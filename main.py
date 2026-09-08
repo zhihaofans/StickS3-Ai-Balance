@@ -3,12 +3,12 @@
 #  ============================================================
 #  运行环境：M5Stack StickS3 + UIFlow2 固件（MicroPython 1.27.0）
 #  功能：
-#    1. 开机连接 WiFi（凭据在 config.py）
+#    1. 开机连接 WiFi（凭据在 config.json）
 #    2. 查询 AI 站点余额，屏幕显示 + 串口打印
 #    3. 按键 A 单击 = 刷新当前站点余额
 #    4. 按键 B 单击 = 切换站点（DeepSeek / 硅基流动 / Moonshot）
 #
-#  修改 WiFi / API Key：直接编辑 config.py 后重启即可
+#  修改 WiFi / API Key：直接编辑 config.json 后重启即可
 #  ============================================================
 
 import M5
@@ -26,22 +26,52 @@ FONT_BALANCE = Widgets.FONTS.DejaVu24    # 余额大数字
 FONT_STATUS = Widgets.FONTS.DejaVu12     # 状态 / 时间数字
 FONT_CN = Widgets.FONTS.EFontCN24        # 中文（电量 / 刷新 / 提示）
 
-# 尝试导入配置
-try:
-    import config
-    WIFI_LIST = getattr(config, "WIFI_LIST", [])
-    WIFI_SSID = getattr(config, "WIFI_SSID", "")
-    WIFI_PASSWORD = getattr(config, "WIFI_PASSWORD", "")
-    DEEPSEEK_API_KEY = getattr(config, "DEEPSEEK_API_KEY", "")
-    SILICONFLOW_API_KEY = getattr(config, "SILICONFLOW_API_KEY", "")
-    MOONSHOT_API_KEY = getattr(config, "MOONSHOT_API_KEY", "")
-except ImportError:
-    WIFI_LIST = []
-    WIFI_SSID = ""
-    WIFI_PASSWORD = ""
-    DEEPSEEK_API_KEY = ""
-    SILICONFLOW_API_KEY = ""
-    MOONSHOT_API_KEY = ""
+# 尝试加载配置：优先读 config.json，回退到旧格式 config.py，都没有则用空值
+def _load_config():
+    """读取配置，返回 dict。优先 config.json，其次 config.py。"""
+    cfg = {
+        "wifi_list": [],
+        "wifi_ssid": "",
+        "wifi_password": "",
+        "deepseek_api_key": "",
+        "siliconflow_api_key": "",
+        "moonshot_api_key": "",
+    }
+    # 优先 config.json（先试 /flash/ 绝对路径，再试相对路径）
+    for path in ("/flash/config.json", "config.json"):
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                for k in cfg:
+                    if k in data:
+                        cfg[k] = data[k]
+            print("[配置] 已从 " + path + " 加载")
+            return cfg
+        except Exception as e:
+            print("[配置] " + path + " 不可用: " + str(e))
+    # 回退 config.py
+    try:
+        import config
+        cfg["wifi_list"] = getattr(config, "WIFI_LIST", [])
+        cfg["wifi_ssid"] = getattr(config, "WIFI_SSID", "")
+        cfg["wifi_password"] = getattr(config, "WIFI_PASSWORD", "")
+        cfg["deepseek_api_key"] = getattr(config, "DEEPSEEK_API_KEY", "")
+        cfg["siliconflow_api_key"] = getattr(config, "SILICONFLOW_API_KEY", "")
+        cfg["moonshot_api_key"] = getattr(config, "MOONSHOT_API_KEY", "")
+        print("[配置] 已从 config.py 加载（旧格式）")
+    except ImportError:
+        print("[配置] 未找到配置文件，使用空值")
+    return cfg
+
+
+_cfg = _load_config()
+WIFI_LIST = _cfg["wifi_list"]
+WIFI_SSID = _cfg["wifi_ssid"]
+WIFI_PASSWORD = _cfg["wifi_password"]
+DEEPSEEK_API_KEY = _cfg["deepseek_api_key"]
+SILICONFLOW_API_KEY = _cfg["siliconflow_api_key"]
+MOONSHOT_API_KEY = _cfg["moonshot_api_key"]
 
 # 屏幕尺寸
 SCREEN_W = 135

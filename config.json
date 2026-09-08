@@ -1,0 +1,8 @@
+{
+  "wifi_list": [["WiFi名称1", "密码1"],],
+  "wifi_ssid": "",
+  "wifi_password": "",
+  "deepseek_api_key": "sk-...",
+  "siliconflow_api_key": "",
+  "moonshot_api_key": ""
+}
