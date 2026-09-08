@@ -279,6 +279,9 @@ def query_site(site_idx):
     name = site["name"]
     api_key = site["key"]()
 
+    # 加载余额时顺带刷新电量（切换站点、手动刷新都会走到这里）
+    update_battery()
+
     if not api_key or len(api_key) < 10:
         print("[结果] " + name + " 查询失败: No Key")
         return False, "No Key"
@@ -470,19 +473,9 @@ def setup():
             label_status.setText("WiFi failed")
 
 
-# 电量定时刷新计数器
-_battery_tick = 0
-
-
 def loop():
-    """主循环：定时刷新电量"""
-    global _battery_tick
+    """主循环：处理按键事件（电量在查询余额时刷新）"""
     M5.update()
-    _battery_tick += 1
-    # 每 10 秒（100 次 × 0.1s）刷新一次电量
-    if _battery_tick >= 100:
-        _battery_tick = 0
-        update_battery()
     time.sleep(0.1)
 
 
