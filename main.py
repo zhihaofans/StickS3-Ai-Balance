@@ -29,12 +29,14 @@ FONT_CN = Widgets.FONTS.EFontCN24        # 中文（电量 / 刷新 / 提示）
 # 尝试导入配置
 try:
     import config
+    WIFI_LIST = getattr(config, "WIFI_LIST", [])
     WIFI_SSID = getattr(config, "WIFI_SSID", "")
     WIFI_PASSWORD = getattr(config, "WIFI_PASSWORD", "")
     DEEPSEEK_API_KEY = getattr(config, "DEEPSEEK_API_KEY", "")
     SILICONFLOW_API_KEY = getattr(config, "SILICONFLOW_API_KEY", "")
     MOONSHOT_API_KEY = getattr(config, "MOONSHOT_API_KEY", "")
 except ImportError:
+    WIFI_LIST = []
     WIFI_SSID = ""
     WIFI_PASSWORD = ""
     DEEPSEEK_API_KEY = ""
@@ -199,26 +201,72 @@ def update_battery():
 # 连接 WiFi
 # ------------------------------------------------------------
 def connect_wifi():
-    if not WIFI_SSID:
-        return False, "No WiFi config\nEdit config.py"
-
+    """逐个尝试 WiFi（优先 WIFI_LIST，回退单 SSID），返回 (是否成功, IP 或错误)"""
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
 
     if wlan.isconnected():
         return True, wlan.ifconfig()[0]
 
-    print("[WiFi] 连接中: " + WIFI_SSID)
+    # 构造待尝试的 WiFi 列表
+    candidates = []
+    if WIFI_LIST:
+        for item in WIFI_LIST:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                candidates.append((item[0], item[1]))
+    # 回退到单 SSID
+    if not candidates and WIFI_SSID:
+        candidates.append((WIFI_SSID, WIFI_PASSWORD))
 
-    wlan.connect(WIFI_SSID, WIFI_PASSWORD)
+    if not candidates:
+        return False, "No WiFi config"
 
-    for _ in range(30):
-        if wlan.isconnected():
-            ip = wlan.ifconfig()[0]
-            print("[WiFi] 已连接, IP: " + ip)
-            return True, ip
+    # 过滤空 SSID，保证序号/总数准确
+    candidates = [(s, p) for s, p in candidates if s]
+    if not candidates:
+        return False, "No WiFi config"
+
+    total = len(candidates)
+
+    # 逐个尝试
+    for i, (ssid, password) in enumerate(candidates, 1):
+        print("[WiFi] 尝试连接: " + ssid)
+
+        # 屏幕提示正在连接哪个 SSID（用中文字体，兼容中文/英文 SSID）
+        if label_title:
+            # 标题带进度：统一显示 i/N（单个时即 1/1）
+            label_title.setText("WiFi %d/%d" % (i, total))
+        if label_currency:
+            label_currency.setFont(FONT_CN)
+            label_currency.setColor(0x00CCFF)
+            label_currency.setText(ssid)
+
+        # 尝试新 SSID 前先断开上一个失败的连接，清空 WiFi 状态机，
+        # 否则连续 connect 会阻塞（卡在第二个 SSID 不再往下试）
+        wlan.disconnect()
         time.sleep(0.5)
 
+        wlan.connect(ssid, password)
+
+        # 等待 8 秒（16 次 × 0.5s）
+        for _ in range(16):
+            if wlan.isconnected():
+                ip = wlan.ifconfig()[0]
+                print("[WiFi] 已连接: " + ssid + " IP: " + ip)
+                # 恢复余额标签字体
+                if label_currency:
+                    label_currency.setFont(FONT_BALANCE)
+                return True, ip
+            time.sleep(0.5)
+
+        # 连接失败，主动断开，确保下次尝试状态干净
+        wlan.disconnect()
+        time.sleep(0.3)
+        print("[WiFi] 连接失败: " + ssid + "，尝试下一个")
+
+    # 全部失败，恢复字体
+    if label_currency:
+        label_currency.setFont(FONT_BALANCE)
     return False, "WiFi failed"
 
 
@@ -411,6 +459,9 @@ def setup():
 
     ok, info = connect_wifi()
     if ok:
+        # 恢复标题为当前站点名
+        if label_title:
+            label_title.setText(SITES[current_site]["name"])
         sync_time()
         ok2, result = query_site(current_site)
         show_result(result, ok2)
