@@ -18,6 +18,14 @@ import time
 import json
 import ntptime
 
+# ------------------------------------------------------------
+# 字体常量（统一管理，改字体只需改这里）
+# ------------------------------------------------------------
+FONT_TITLE = Widgets.FONTS.DejaVu18      # 标题（站点名）
+FONT_BALANCE = Widgets.FONTS.DejaVu24    # 余额大数字
+FONT_STATUS = Widgets.FONTS.DejaVu12     # 状态 / 时间数字
+FONT_CN = Widgets.FONTS.EFontCN24        # 中文（电量 / 刷新 / 提示）
+
 # 尝试导入配置
 try:
     import config
@@ -39,6 +47,7 @@ SCREEN_H = 240
 
 # 全局标签（屏幕元素）
 label_title = None      # 标题（站点名）
+label_battery = None    # 电量
 label_currency = None   # 币种+余额（大数字）
 label_balance = None    # 余额（备用）
 label_status = None     # 状态
@@ -138,6 +147,52 @@ def update_refresh_time():
         label_time.setText("刷新")
     if label_time_val:
         label_time_val.setText(get_time_str())
+
+
+def get_battery_level():
+    """平滑读取电量：连读 3 次取中值，返回整数百分比"""
+    try:
+        samples = []
+        for _ in range(3):
+            samples.append(M5.Power.getBatteryLevel())
+            time.sleep(0.05)
+        samples.sort()
+        return samples[1]  # 中值
+    except Exception as e:
+        print("[电量] 读取失败: " + str(e))
+        return None
+
+
+# 上一次显示的电量（用于变化阈值判断）
+_last_battery_level = None
+
+
+def get_battery_str():
+    """返回电量字符串，充电中显示 'BAT 100% +'"""
+    level = get_battery_level()
+    if level is None:
+        return "BAT --"
+    try:
+        charging = M5.Power.isCharging()
+        s = "BAT " + str(level) + "%"
+        if charging:
+            s += " +"
+        return s
+    except Exception:
+        return "BAT " + str(level) + "%"
+
+
+def update_battery():
+    """更新屏幕电量，仅当变化 ≥ 2% 时刷新，避免频繁跳动"""
+    global label_battery, _last_battery_level
+    level = get_battery_level()
+    if level is None:
+        return
+    # 首次显示，或变化超过阈值才更新
+    if _last_battery_level is None or abs(level - _last_battery_level) >= 2:
+        _last_battery_level = level
+        if label_battery:
+            label_battery.setText(get_battery_str())
 
 
 # ------------------------------------------------------------
@@ -275,7 +330,7 @@ def btn_b_click_cb(state):
 # 主初始化
 # ------------------------------------------------------------
 def setup():
-    global label_title, label_currency, label_balance, label_status, label_time, label_time_val, label_hint
+    global label_title, label_battery, label_currency, label_balance, label_status, label_time, label_time_val, label_hint
 
     M5.begin()
     Widgets.setRotation(0)
@@ -285,49 +340,56 @@ def setup():
     label_title = Widgets.Label(
         "DeepSeek", 5, 5, 1.0,
         0xFFFFFF, 0x000000,
-        Widgets.FONTS.DejaVu18
+        FONT_TITLE
+    )
+
+    # 电量（英文，小字）
+    label_battery = Widgets.Label(
+        "", 5, 30, 1.0,
+        0x00CCFF, 0x000000,
+        FONT_STATUS
     )
 
     # 币种+余额（大数字，绿色）
     label_currency = Widgets.Label(
-        "", 5, 45, 1.0,
+        "", 5, 60, 1.0,
         0x00FF00, 0x000000,
-        Widgets.FONTS.DejaVu24
+        FONT_BALANCE
     )
 
     # 余额（备用，暂未用）
     label_balance = Widgets.Label(
-        "", 5, 80, 1.0,
+        "", 5, 95, 1.0,
         0x00FF00, 0x000000,
-        Widgets.FONTS.DejaVu24
+        FONT_BALANCE
     )
 
     # 状态
     label_status = Widgets.Label(
-        "", 5, 115, 1.0,
+        "", 5, 130, 1.0,
         0x888888, 0x000000,
-        Widgets.FONTS.DejaVu12
+        FONT_STATUS
     )
 
     # "刷新" 中文
     label_time = Widgets.Label(
-        "", 5, 140, 1.0,
+        "", 5, 155, 1.0,
         0x888888, 0x000000,
-        Widgets.FONTS.EFontCN24
+        FONT_CN
     )
 
     # 时间数字
     label_time_val = Widgets.Label(
-        "", 55, 148, 1.0,
+        "", 55, 163, 1.0,
         0x888888, 0x000000,
-        Widgets.FONTS.DejaVu12
+        FONT_STATUS
     )
 
     # 底部提示
     label_hint = Widgets.Label(
-        "A刷新 B换站", 5, 200, 1.0,
+        "A刷新 B换站", 5, 205, 1.0,
         0x555555, 0x000000,
-        Widgets.FONTS.EFontCN24
+        FONT_CN
     )
 
     print("\n==============================")
@@ -344,6 +406,9 @@ def setup():
         cb=btn_b_click_cb
     )
 
+    # 初始化电量显示
+    update_battery()
+
     ok, info = connect_wifi()
     if ok:
         sync_time()
@@ -354,8 +419,19 @@ def setup():
             label_status.setText("WiFi failed")
 
 
+# 电量定时刷新计数器
+_battery_tick = 0
+
+
 def loop():
+    """主循环：定时刷新电量"""
+    global _battery_tick
     M5.update()
+    _battery_tick += 1
+    # 每 10 秒（100 次 × 0.1s）刷新一次电量
+    if _battery_tick >= 100:
+        _battery_tick = 0
+        update_battery()
     time.sleep(0.1)
 
 
